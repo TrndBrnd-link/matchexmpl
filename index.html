@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Omega Arena — Live Simulation</title>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        /* --- GLOBAL RESETS --- */
+        :root {
+            --bg: #050508;
+            --sun-core: #ffaa00;
+            --r1: #FF003C;
+            --r2: #00F3FF;
+            --r3: #FFE600;
+            --font-tech: 'Rajdhani', sans-serif;
+
+            /* Battle Vars */
+            --b-primary: #fe2c55;
+            --b-secondary: #25f4ee;
+            --b-gold: #ffd700;
+            --b-silver: #c0c0c0;
+            --b-bronze: #cd7f32;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            background: var(--bg);
+            background-image: radial-gradient(ellipse at top, #080e21 0%, #1b2735 95%);
+            color: white;
+            font-family: var(--font-tech);
+            -webkit-font-smoothing: antialiased;
+            text-rendering: optimizeLegibility;
+            overflow: hidden;
+            height: 100vh; width: 100vw;
+        }
+
+        /* =========================================
+           LAYER 1: METEOR SHOWER (BACKGROUND)
+           ========================================= */
+        #meteor-container { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+        .star { position: absolute; width: 1px; height: 1px; background: transparent; }
+        .meteor {
+            position: absolute; width: 300px; height: 1px; transform: rotate(-45deg);
+            background-image: linear-gradient(to right, #fff, rgba(255,255,255,0));
+            opacity: 0;
+        }
+        .meteor:before {
+            content: ""; position: absolute; width: 4px; height: 5px; border-radius: 50%; margin-top: -2px;
+            background: rgba(255,255,255,0.7); box-shadow: 0 0 15px 3px #fff;
+        }
+        @keyframes meteor-anim {
+            0% { opacity: 1; margin-top: -300px; margin-right: -300px; }
+            12% { opacity: 0; }
+            15% { margin-top: 300px; margin-left: -600px; opacity: 0; }
+            100% { opacity: 0; }
+        }
+
+        /* =========================================
+           LAYER 2: SOLAR SYSTEM (MIDDLE)
+           ========================================= */
+        #fx-canvas { position: fixed; inset: 0; z-index: 50; pointer-events: none; mix-blend-mode: screen; }
+        .vignette { position: fixed; inset: 0; pointer-events: none; z-index: 100; background: radial-gradient(circle, transparent 30%, black 120%); }
+        #viewport { position: fixed; inset: 0; width: 100%; height: 100%; cursor: grab; z-index: 10; }
+        #viewport:active { cursor: grabbing; }
+        #universe { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform-style: flat; }
+
+        .sun-wrapper {
+            position: absolute; left: -150px; top: -150px; width: 300px; height: 300px;
+            display: flex; justify-content: center; align-items: center; z-index: 5;
+        }
+        .sun-border-fx {
+            position: absolute; inset: -30px; border-radius: 50%;
+            border: 2px dashed rgba(255, 170, 0, 0.4);
+            animation: spinSun 30s linear infinite; pointer-events: none;
+        }
+        .sun-body {
+            position: relative; width: 100%; height: 100%; border-radius: 50%;
+            background: #000; border: 4px solid #fff;
+            box-shadow: 0 0 100px var(--sun-core), inset 0 0 60px var(--sun-core);
+            cursor: pointer; overflow: hidden; z-index: 2;
+            transition: transform 0.25s ease, box-shadow 0.25s ease;
+        }
+        .sun-body:hover { transform: scale(1.035); box-shadow: 0 0 140px var(--sun-core), inset 0 0 70px var(--sun-core); }
+        .sun-img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; opacity: 0.95; }
+
+        /* BUBBLES (PLAYER NODES) */
+        .bubble {
+            position: absolute; width: 140px; height: 140px;
+            margin-left: -70px; margin-top: -70px;
+            border-radius: 50%; background: #000;
+            z-index: 20; will-change: transform;
+        }
+        .bubble-img-wrap {
+            position: absolute; inset: 0; border-radius: 50%; overflow: hidden;
+            z-index: 0; background: #111; cursor: pointer;
+            border: 2px solid rgba(255,255,255,0.2); transition: border-color 0.3s, transform 0.2s;
+        }
+        .bubble-img-wrap:hover { transform: scale(1.04); }
+        .bubble-img { width: 100%; height: 100%; object-fit: cover; object-position: center; opacity: 0.92; transition: 0.3s; display: block; }
+        .bubble-img-wrap:hover .bubble-img { opacity: 1; }
+
+        .rank-badge {
+            position: absolute; top: -15px; left: 50%; transform: translateX(-50%);
+            background: #000; padding: 2px 10px; border-radius: 8px;
+            font-weight: 800; font-size: 12px; z-index: 25; border: 1px solid #555;
+            white-space: nowrap; box-shadow: 0 4px 10px rgba(0,0,0,0.8);
+            font-family: var(--font-tech); letter-spacing: 0.5px;
+        }
+
+        /* Clear, smooth, larger player name chip */
+        .name-chip {
+            position: absolute; bottom: -38px; left: 50%; transform: translateX(-50%);
+            background: rgba(8, 8, 12, 0.72); backdrop-filter: blur(6px);
+            padding: 4px 16px; border-radius: 20px; z-index: 22;
+            border: 1px solid rgba(255,255,255,0.25);
+            font-family: var(--font-tech); font-weight: 800; font-size: 16px;
+            letter-spacing: 0.6px; text-transform: uppercase; color: #fff;
+            text-shadow: 0 0 12px rgba(255,255,255,0.55);
+            white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis;
+            pointer-events: none;
+        }
+
+        .score-badge {
+            position: absolute; bottom: -68px; left: 50%; transform: translateX(-50%);
+            background: #111; padding: 2px 12px; border-radius: 4px;
+            font-weight: 700; font-size: 15px; z-index: 20;
+            border: 1px solid #444; color: #fff; min-width: 60px; text-align: center;
+            pointer-events: none; font-variant-numeric: tabular-nums;
+        }
+
+        .rank-high .bubble-img-wrap { border: 3px solid #fff; box-shadow: 0 0 30px var(--r1); }
+        .rank-high .rank-badge { background: var(--r1); border-color: #fff; }
+        .rank-high .name-chip { border-color: var(--r1); box-shadow: 0 0 18px rgba(255,0,60,0.35); }
+        .rank-mid .bubble-img-wrap { border: 2px solid var(--r2); box-shadow: 0 0 20px var(--r2); }
+        .rank-mid .rank-badge { background: var(--r2); color: #000; }
+        .rank-mid .name-chip { border-color: var(--r2); }
+
+        @keyframes spinSun { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .shake-active { animation: screenShake 0.4s cubic-bezier(.36,.07,.19,.97) both; }
+        @keyframes screenShake {
+            10%, 90% { transform: translate3d(-2px, 0, 0); }
+            20%, 80% { transform: translate3d(4px, 0, 0); }
+            30%, 50%, 70% { transform: translate3d(-8px, 0, 0); }
+            40%, 60% { transform: translate3d(8px, 0, 0); }
+        }
+
+        /* =========================================
+           LAYER 3: AUTOMATIC BATTLE (OVERLAY)
+           ========================================= */
+        #battle-overlay { position: fixed; inset: 0; z-index: 800; pointer-events: none; }
+        #countdown-layer { pointer-events: auto; }
+
+        #battle-stage { position: absolute; width: 100%; height: 100%; pointer-events: none; overflow: hidden; }
+
+        .fly-item {
+            position: absolute; left: 0; top: 0;
+            display: inline-flex; align-items: center; gap: 5px;
+            white-space: nowrap; padding: 5px 10px; border-radius: 50px;
+            background: rgba(30, 30, 30, 0.8); border: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5); font-weight: bold; font-size: 14px;
+            transform: translate(var(--startX), 110vh) scale(var(--scale)); opacity: 0;
+            animation: flyToCorner var(--duration) cubic-bezier(0.215, 0.610, 0.355, 1.000) forwards;
+            will-change: transform, opacity; z-index: var(--z);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        .fly-item span { color: var(--b-secondary); }
+        .fly-item.rank-1 { border: 2px solid var(--b-gold); background: rgba(255, 215, 0, 0.2); box-shadow: 0 0 15px var(--b-gold); z-index: 1000 !important; }
+        .fly-item.rank-1::before { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 100%; height: 100%; border-radius: 50px; border: 2px solid var(--b-gold); animation: shockwave 1s infinite; }
+        .fly-item.rank-2 { border: 1px solid var(--b-silver); box-shadow: 0 0 10px var(--b-silver); }
+        .fly-item.rank-3 { border: 1px solid var(--b-bronze); box-shadow: 0 0 8px var(--b-bronze); }
+
+        .spark { position: absolute; width: 4px; height: 4px; background: white; border-radius: 50%; top: -5px; right: -5px; box-shadow: 0 0 5px white; animation: flicker 0.5s infinite alternate; }
+        .fly-item.rank-2 .spark { background: var(--b-silver); }
+        .fly-item.rank-3 .spark { background: var(--b-bronze); }
+        .confetti-piece { position: absolute; width: 6px; height: 6px; background: var(--c); top: 50%; left: 50%; border-radius: 50%; pointer-events: none; animation: popOut 0.6s ease-out infinite; }
+
+        @keyframes flyToCorner {
+            0% { opacity: 0; transform: translate(var(--startX), 105vh) scale(0.5); }
+            10% { opacity: 1; }
+            85% { opacity: 1; transform: translate(10px, 60px) scale(var(--scale)); }
+            100% { opacity: 0; transform: translate(0px, 40px) scale(0.2); }
+        }
+        @keyframes shockwave { 0% { width: 100%; height: 100%; opacity: 1; border-width: 2px; } 100% { width: 200%; height: 250%; opacity: 0; border-width: 0px; } }
+        @keyframes popOut { 0% { transform: translate(-50%, -50%) scale(0); opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)) scale(1); opacity: 0; } }
+        @keyframes flicker { 0% { opacity: 0.3; transform: scale(0.8); } 100% { opacity: 1; transform: scale(1.2); } }
+
+        #scoreboard { position: absolute; top: 16px; right: 16px; text-align: right; z-index: 850; pointer-events: none; }
+        .score-row { font-size: 13px; color: #ccc; margin-bottom: 3px; transition: 0.2s; font-family: sans-serif; }
+        .score-row.leader { color: var(--b-gold); font-weight: bold; text-shadow: 0 0 10px rgba(255, 215, 0, 0.5); font-size: 15px; }
+
+        #countdown-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8);
+            display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1200;
+            opacity: 0; pointer-events: none; transition: opacity 0.5s;
+        }
+        #countdown-layer.visible { opacity: 1; pointer-events: auto; }
+        .cnt-num { font-size: 6rem; font-weight: 800; color: var(--b-secondary); text-shadow: 0 0 40px rgba(37,244,238,0.6); }
+        .cnt-label { color: #aaa; letter-spacing: 4px; font-size: 13px; margin-top: 6px; }
+
+        /* =========================================
+           PLAYER POPUP — GLASSMORPHISM CARD
+           ========================================= */
+        #modal-overlay {
+            position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center;
+            background: rgba(4, 4, 8, 0.72); backdrop-filter: blur(10px) saturate(140%);
+            opacity: 0; pointer-events: none; transition: opacity 0.35s ease; padding: 20px;
+        }
+        #modal-overlay.active { opacity: 1; pointer-events: auto; }
+
+        .player-card {
+            position: relative; width: 360px; max-width: 100%;
+            background: linear-gradient(160deg, rgba(255,255,255,0.12), rgba(255,255,255,0.03));
+            border: 1px solid rgba(255,255,255,0.22);
+            border-radius: 26px;
+            box-shadow: 0 25px 70px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.25);
+            padding: 30px 26px 26px; text-align: center;
+            transform: scale(0.85) translateY(24px); opacity: 0;
+            transition: transform 0.4s cubic-bezier(.19,1,.22,1), opacity 0.35s ease;
+        }
+        #modal-overlay.active .player-card { transform: scale(1) translateY(0); opacity: 1; }
+
+        .player-card-close {
+            position: absolute; top: 14px; right: 14px; width: 34px; height: 34px; border-radius: 50%;
+            background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.25);
+            color: #fff; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; transition: 0.25s; font-size: 15px;
+        }
+        .player-card-close:hover { background: rgba(255,50,50,0.4); transform: rotate(90deg); }
+
+        .player-card-rank {
+            position: absolute; top: 18px; left: 18px; background: rgba(0,0,0,0.5);
+            border: 1px solid rgba(255,255,255,0.25); border-radius: 14px; padding: 4px 12px;
+            font-size: 11px; font-weight: 800; letter-spacing: 1px; color: #fff;
+        }
+
+        .player-card-img-wrap {
+            width: 150px; height: 150px; margin: 10px auto 18px; border-radius: 50%; overflow: hidden;
+            border: 3px solid rgba(255,255,255,0.4);
+            box-shadow: 0 0 45px rgba(255,255,255,0.25), 0 0 0 6px rgba(255,255,255,0.06);
+        }
+        .player-card-img-wrap img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
+
+        .player-card h2 {
+            font-family: var(--font-tech); font-size: 27px; font-weight: 800; letter-spacing: 1px;
+            color: #fff; margin-bottom: 4px; text-shadow: 0 0 20px rgba(255,255,255,0.35); text-transform: uppercase;
+        }
+        .player-card .player-card-score {
+            font-family: var(--font-tech); font-size: 13px; letter-spacing: 1.5px; color: var(--b-secondary);
+            font-weight: 700; margin-bottom: 16px; text-transform: uppercase;
+        }
+        .player-card p.bio {
+            font-size: 14.5px; line-height: 1.6; color: #d4d7dd; margin: 0 0 24px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        .wa-btn {
+            display: inline-flex; align-items: center; gap: 10px; justify-content: center; width: 100%;
+            padding: 14px 0; border-radius: 15px; background: linear-gradient(135deg, #25d366, #128c7e);
+            color: #fff; font-weight: 700; text-decoration: none; font-size: 15px; letter-spacing: 0.5px;
+            box-shadow: 0 10px 28px rgba(37,211,102,0.4); transition: 0.25s; font-family: var(--font-tech);
+        }
+        .wa-btn i { font-size: 20px; }
+        .wa-btn:hover { transform: translateY(-2px); box-shadow: 0 14px 34px rgba(37,211,102,0.55); }
+
+    </style>
+</head>
+<body id="main-body">
+
+    <div id="meteor-container"></div>
+    <div class="vignette"></div>
+    <canvas id="fx-canvas"></canvas>
+
+    <div style="position:fixed; top:20px; left:30px; z-index:500; pointer-events:none">
+        <div style="font-size:14px; color:var(--r1); font-weight:800; letter-spacing:4px"> LIVE </div>
+        <div style="font-size:36px; font-weight:800; color:#fff"></div>
+    </div>
+
+    <div id="viewport">
+        <div id="universe">
+            <div class="sun-wrapper">
+                <div class="sun-border-fx"></div>
+                <div class="sun-body" id="sun-body">
+                    <img id="sun-img-display" class="sun-img" src="assets/1.jpg" alt="Sun">
+                </div>
+            </div>
+            <div id="bubble-container"></div>
+        </div>
+    </div>
+
+    <div id="battle-overlay">
+        <div id="countdown-layer">
+            <div class="cnt-num" id="cnt-display">10</div>
+            <div class="cnt-label">NEXT BATTLE STARTING...</div>
+        </div>
+        <div id="scoreboard"></div>
+        <div id="battle-stage"></div>
+    </div>
+
+    <!-- PLAYER POPUP CARD -->
+    <div id="modal-overlay" onclick="if(event.target===this) Game.closeModal()">
+        <div class="player-card">
+            <div class="player-card-close" onclick="Game.closeModal()"><i class="fas fa-times"></i></div>
+            <div class="player-card-rank" id="modal-rank">RANK #1</div>
+            <div class="player-card-img-wrap"><img id="modal-img" src="" alt=""></div>
+            <h2 id="modal-name">Name</h2>
+            <div class="player-card-score" id="modal-score">0 PTS</div>
+            <p class="bio" id="modal-bio">Bio</p>
+            <a class="wa-btn" id="modal-wa" href="#" target="_blank" rel="noopener">
+                <i class="fa-brands fa-whatsapp"></i> Message on WhatsApp
+            </a>
+        </div>
+    </div>
+
+
+    <!-- ===================== CONFIG (players, sun, battle settings) ===================== -->
+    <script src="config.js"></script>
+
+
+    <!-- ===================== METEOR SHOWER ===================== -->
+    <script>
+        (function() {
+            const container = document.getElementById('meteor-container');
+            const starCount = 300;
+            const meteorCount = 15;
+
+            let shadows = [];
+            for (let i = 0; i < starCount; i++) {
+                let x = Math.floor(Math.random() * window.innerWidth);
+                let y = Math.floor(Math.random() * window.innerHeight);
+                shadows.push(`${x}px ${y}px #fff`);
+            }
+            const starLayer = document.createElement('div');
+            starLayer.className = 'star';
+            starLayer.style.boxShadow = shadows.join(',');
+            container.appendChild(starLayer);
+
+            for (let i = 0; i < meteorCount; i++) {
+                const m = document.createElement('div');
+                m.className = 'meteor';
+                const left = Math.floor(Math.random() * 90) + 9;
+                const top = Math.floor(Math.random() * 250) + 50;
+                const dur = (Math.floor(Math.random() * 70) / 10) + 3;
+                m.style.left = left + '%';
+                m.style.top = top + 'px';
+                m.style.animation = `meteor-anim ${dur}s linear infinite`;
+                m.style.animationDelay = Math.random() * 5 + 's';
+                container.appendChild(m);
+            }
+        })();
+    </script>
+
+
+    <!-- ===================== VISUAL FX ENGINE ===================== -->
+    <script>
+        const ORBIT = {
+            baseOrbit: 320,
+            orbitStep: 130,
+            baseSpeed: 0.0003,
+            speedStep: 0.000015,
+            colors: ['#FF003C', '#00F3FF', '#FFE600', '#C430FF', '#39FF14', '#FF5E00', '#0088FF', '#FF00FF', '#00FF9D', '#FFFFFF']
+        };
+
+        const FX = {
+            cvs: document.getElementById('fx-canvas'),
+            ctx: document.getElementById('fx-canvas').getContext('2d'),
+            particles: [],
+
+            init() { this.resize(); window.addEventListener('resize', () => this.resize()); },
+            resize() { this.cvs.width = window.innerWidth; this.cvs.height = window.innerHeight; },
+
+            spawnShockwave(x, y, color, scale) {
+                this.particles.push({ t: 'wave', x, y, r: 70 * scale, maxR: 160 * scale, c: color, w: 2, a: 0.6, s: 4 });
+            },
+            spawnBlastWave(x, y, color, scale) {
+                this.particles.push({ t: 'wave', x, y, r: 70 * scale, maxR: 220 * scale, c: color, w: 10, a: 0.8, s: 3 });
+            },
+            spawnParticleBurst(x, y, color, scale) {
+                for (let i = 0; i < 8; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = Math.random() * 5 + 2;
+                    this.particles.push({ t: 'spark', x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 1, c: color });
+                }
+            },
+            spawnDust(x, y, color, scale) {
+                const angle = Math.random() * Math.PI * 2;
+                const dist = 80 * scale;
+                this.particles.push({ t: 'dust', x: x + Math.cos(angle) * dist, y: y + Math.sin(angle) * dist, vx: Math.cos(angle), vy: Math.sin(angle), life: 1.5, c: color, s: 5 * scale });
+            },
+            spawnSupernova(x, y, color, scale) {
+                this.particles.push({ t: 'flash', x, y, r: 10, maxR: 150 * scale, c: '#fff', a: 1 });
+                setTimeout(() => { this.particles.push({ t: 'wave', x, y, r: 70 * scale, maxR: 400 * scale, c: color, w: 40, a: 1, s: 10 }); }, 100);
+                setTimeout(() => { this.particles.push({ t: 'wave', x, y, r: 50 * scale, maxR: 300 * scale, c: '#fff', w: 5, a: 0.8, s: 8 }); }, 200);
+            },
+            spawnSimpleBlast(x, y, color, scale) {
+                for (let i = 0; i < 6; i++) {
+                    const angle = (Math.PI * 2 / 6) * i;
+                    this.particles.push({ t: 'spike', x, y, angle, len: 70 * scale, maxLen: 180 * scale, c: color, a: 1 });
+                }
+            },
+            spawnMotherWave(x, y) {
+                document.body.classList.remove('shake-active');
+                void document.body.offsetWidth;
+                document.body.classList.add('shake-active');
+                this.particles.push({ t: 'wave', x, y, r: 150, maxR: 2000, c: '#fff', w: 100, a: 1, s: 20 });
+            },
+            render(transform) {
+                this.ctx.clearRect(0, 0, this.cvs.width, this.cvs.height);
+                this.ctx.globalCompositeOperation = 'lighter';
+                const cx = window.innerWidth / 2;
+                const cy = window.innerHeight / 2;
+
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    const p = this.particles[i];
+                    const sx = (p.x * transform.k) + transform.x + cx;
+                    const sy = (p.y * transform.k) + transform.y + cy;
+                    const sr = p.r * transform.k;
+                    this.ctx.beginPath();
+                    if (p.t === 'wave') {
+                        p.r += p.s; p.a -= 0.015; p.w *= 0.95;
+                        this.ctx.strokeStyle = p.c; this.ctx.lineWidth = Math.max(0, p.w * transform.k); this.ctx.globalAlpha = Math.max(0, p.a);
+                        this.ctx.arc(sx, sy, sr, 0, Math.PI * 2); this.ctx.stroke();
+                    } else if (p.t === 'flash') {
+                        p.r += 10; p.a -= 0.05;
+                        this.ctx.fillStyle = p.c; this.ctx.globalAlpha = Math.max(0, p.a);
+                        this.ctx.arc(sx, sy, sr, 0, Math.PI * 2); this.ctx.fill();
+                    } else if (p.t === 'spark' || p.t === 'dust') {
+                        p.x += p.vx; p.y += p.vy; p.life -= 0.02;
+                        this.ctx.fillStyle = p.c; this.ctx.globalAlpha = Math.max(0, p.life * 0.5);
+                        const size = (p.t === 'dust' ? p.s : 3) * transform.k;
+                        this.ctx.arc(sx, sy, size, 0, Math.PI * 2); this.ctx.fill();
+                    } else if (p.t === 'spike') {
+                        p.len += 10; p.a -= 0.04;
+                        const ex = sx + Math.cos(p.angle) * (p.len * transform.k);
+                        const ey = sy + Math.sin(p.angle) * (p.len * transform.k);
+                        this.ctx.strokeStyle = p.c; this.ctx.lineWidth = 4 * transform.k; this.ctx.globalAlpha = Math.max(0, p.a);
+                        this.ctx.moveTo(sx, sy); this.ctx.lineTo(ex, ey); this.ctx.stroke();
+                    }
+                    if (p.a <= 0 || p.life <= 0) this.particles.splice(i, 1);
+                }
+            }
+        };
+    </script>
+
+
+    <!-- ===================== CORE GAME (orbit + automatic battle + popup) ===================== -->
+    <script>
+        const Game = {
+            players: [],
+            transform: { k: 0.45, x: 0, y: 0 },
+            lastFrame: 0,
+            lastMotherTime: 0,
+            lastScoreboardPaint: 0,
+
+            battle: {
+                state: 'idle',   // idle -> countdown -> running -> finished -> countdown ...
+                queue: [],
+                processedIndex: 0,
+                startTime: 0,
+                finishedAt: 0,
+                lastFlyTime: 0,
+                countdownTimer: null
+            },
+
+            init() {
+                this.buildPlayers();
+                this.setupD3();
+                this.buildOrbitDOM();
+                this.setupSun();
+                FX.init();
+                this.lastFrame = performance.now();
+                requestAnimationFrame(t => this.loop(t));
+
+                // Kick off the very first battle automatically after a short delay
+                setTimeout(() => this.startRound(), 800);
+            },
+
+            buildPlayers() {
+                const n = PLAYERS.length;
+                this.players = PLAYERS.map((cfg, i) => ({
+                    ...cfg,
+                    score: 0,
+                    rank: i + 1,
+                    lastRank: null,
+                    angle: (Math.PI * 2 / n) * i,
+                    radius: ORBIT.baseOrbit,
+                    targetRadius: ORBIT.baseOrbit,
+                    scale: 1,
+                    targetScale: 1,
+                    speed: ORBIT.baseSpeed,
+                    color: ORBIT.colors[i % ORBIT.colors.length],
+                    timers: {
+                        shock: Math.random() * 1000,
+                        blast: Math.random() * 2000,
+                        particles: Math.random() * 3000,
+                        supernova: Math.random() * 4000,
+                        exp: Math.random() * 2000
+                    }
+                }));
+            },
+
+            setupD3() {
+                const universe = document.getElementById('universe');
+                const zoom = d3.zoom().scaleExtent([0.1, 3]).on('zoom', (e) => {
+                    this.transform = e.transform;
+                    universe.style.transform = `translate(${e.transform.x}px, ${e.transform.y}px) scale(${e.transform.k})`;
+                });
+                d3.select('#viewport').call(zoom).call(zoom.transform, d3.zoomIdentity.translate(0, 0).scale(0.45));
+            },
+
+            setupSun() {
+                document.getElementById('sun-img-display').src = SUN_CONFIG.image;
+                document.getElementById('sun-body').onclick = () => window.open(SUN_CONFIG.link, '_blank', 'noopener');
+            },
+
+            buildOrbitDOM() {
+                const layer = document.getElementById('bubble-container');
+                layer.innerHTML = '';
+                this.players.forEach(p => {
+                    const rankClass = p.rank === 1 ? 'rank-high' : (p.rank <= 3 ? 'rank-mid' : 'rank-low');
+                    const b = document.createElement('div');
+                    b.className = `bubble ${rankClass}`;
+                    b.id = `node-${p.id}`;
+                    b.innerHTML = `
+                        <div class="rank-badge">RANK ${p.rank}</div>
+                        <div class="bubble-img-wrap"
+                             onmousedown="event.stopPropagation()"
+                             ontouchstart="event.stopPropagation()"
+                             onclick="Game.openModal(${p.id})">
+                            <img class="bubble-img" src="${p.image}" alt="${p.name}">
+                        </div>
+                        <div class="name-chip">${p.name}</div>
+                        <div class="score-badge" id="score-${p.id}">0</div>
+                    `;
+                    layer.appendChild(b);
+                });
+            },
+
+            /* ---------------- MAIN RENDER LOOP ---------------- */
+            loop(now) {
+                const dt = now - this.lastFrame;
+                this.lastFrame = now;
+
+                if (now - this.lastMotherTime > 5000) {
+                    this.lastMotherTime = now;
+                    FX.spawnMotherWave(0, 0);
+                }
+
+                this.advanceBattle(now);
+                this.updateOrbit(dt, now);
+
+                if (now - this.lastScoreboardPaint > 180) {
+                    this.lastScoreboardPaint = now;
+                    this.renderScoreboard();
+                }
+
+                FX.render(this.transform);
+                requestAnimationFrame(t => this.loop(t));
+            },
+
+            updateOrbit(dt, now) {
+                const sorted = [...this.players].sort((a, b) => b.score - a.score);
+                sorted.forEach((p, idx) => { p.rank = idx + 1; });
+
+                this.players.forEach(p => {
+                    p.targetRadius = ORBIT.baseOrbit + ((p.rank - 1) * ORBIT.orbitStep);
+                    p.radius += (p.targetRadius - p.radius) * 0.06;
+
+                    p.targetScale = 1 + Math.min(0.45, (p.score / BATTLE_CONFIG.maxScore) * 0.45);
+                    p.scale += (p.targetScale - p.scale) * 0.08;
+
+                    p.speed = ORBIT.baseSpeed - (ORBIT.speedStep * p.rank);
+                    p.angle += p.speed * dt;
+
+                    const x = Math.cos(p.angle) * p.radius;
+                    const y = Math.sin(p.angle) * p.radius;
+                    const el = document.getElementById(`node-${p.id}`);
+                    if (el) {
+                        el.style.transform = `translate(${x}px, ${y}px) scale(${p.scale})`;
+                        el.style.zIndex = Math.floor(y + 20000);
+
+                        if (p.lastRank !== p.rank) {
+                            p.lastRank = p.rank;
+                            const rankBadge = el.querySelector('.rank-badge');
+                            if (rankBadge) rankBadge.textContent = `RANK ${p.rank}`;
+                            el.classList.remove('rank-high', 'rank-mid', 'rank-low');
+                            el.classList.add(p.rank === 1 ? 'rank-high' : (p.rank <= 3 ? 'rank-mid' : 'rank-low'));
+                        }
+                        const scoreEl = document.getElementById(`score-${p.id}`);
+                        if (scoreEl) scoreEl.textContent = p.score;
+                    }
+
+                    if (now > p.timers.shock + 1000) { FX.spawnShockwave(x, y, p.color, p.scale); p.timers.shock = now; }
+                    if (now > p.timers.blast + 2000) { FX.spawnBlastWave(x, y, p.color, p.scale); p.timers.blast = now; }
+                    if (now > p.timers.particles + 3000) { FX.spawnParticleBurst(x, y, p.color, p.scale); p.timers.particles = now; }
+                    if (p.rank <= 3) { if (Math.random() > 0.8) FX.spawnDust(x, y, p.color, p.scale); }
+                    if (p.rank <= 5) { if (now > p.timers.supernova + 4000) { FX.spawnSupernova(x, y, p.color, p.scale); p.timers.supernova = now; } }
+                    if (p.rank >= 5) { if (now > p.timers.exp + 2000) { FX.spawnSimpleBlast(x, y, p.color, p.scale); p.timers.exp = now; } }
+                });
+            },
+
+            /* ---------------- AUTOMATIC BATTLE ---------------- */
+            startRound() {
+                this.players.forEach(p => p.score = 0);
+
+                const queue = [];
+                this.players.forEach(p => {
+                    const target = Math.floor(Math.random() * (BATTLE_CONFIG.maxScore - BATTLE_CONFIG.minScore + 1)) + BATTLE_CONFIG.minScore;
+                    for (let k = 0; k < target; k++) queue.push(p.id);
+                });
+                for (let i = queue.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [queue[i], queue[j]] = [queue[j], queue[i]];
+                }
+
+                this.battle.queue = queue;
+                this.battle.processedIndex = 0;
+                this.runCountdown(BATTLE_CONFIG.countdownSec, () => {
+                    this.battle.state = 'running';
+                    this.battle.startTime = performance.now();
+                });
+            },
+
+            runCountdown(seconds, cb) {
+                this.battle.state = 'countdown';
+                const layer = document.getElementById('countdown-layer');
+                const num = document.getElementById('cnt-display');
+                layer.classList.add('visible');
+                let t = seconds;
+                num.innerText = t;
+                clearInterval(this.battle.countdownTimer);
+                this.battle.countdownTimer = setInterval(() => {
+                    t--;
+                    num.innerText = t;
+                    if (t <= 0) {
+                        clearInterval(this.battle.countdownTimer);
+                        layer.classList.remove('visible');
+                        cb();
+                    }
+                }, 1000);
+            },
+
+            advanceBattle(now) {
+                if (this.battle.state === 'running') {
+                    const total = this.battle.queue.length;
+                    const durationMs = BATTLE_CONFIG.roundDurationSec * 1000;
+                    const elapsed = now - this.battle.startTime;
+                    const progress = Math.min(1, elapsed / durationMs);
+                    const targetIdx = Math.floor(progress * total);
+
+                    while (this.battle.processedIndex < targetIdx && this.battle.processedIndex < total) {
+                        const pid = this.battle.queue[this.battle.processedIndex];
+                        const p = this.players.find(x => x.id === pid);
+                        if (p) {
+                            p.score++;
+                            if (now - this.battle.lastFlyTime > 140) {
+                                this.battle.lastFlyTime = now;
+                                this.createFlyingBubble(p.name, p.rank);
+                            }
+                        }
+                        this.battle.processedIndex++;
+                    }
+
+                    if (progress >= 1 || this.battle.processedIndex >= total) {
+                        this.battle.state = 'finished';
+                        this.battle.finishedAt = now;
+                    }
+                } else if (this.battle.state === 'finished') {
+                    if (now - this.battle.finishedAt > BATTLE_CONFIG.pauseBetweenSec * 1000) {
+                        this.startRound();
+                    }
+                }
+            },
+
+            renderScoreboard() {
+                const board = document.getElementById('scoreboard');
+                const sorted = [...this.players].sort((a, b) => b.score - a.score);
+                board.innerHTML = sorted.map((p, index) => {
+                    const rankClass = index === 0 ? 'leader' : '';
+                    return `<div class="score-row ${rankClass}">${index + 1}. ${p.name}: ${p.score}</div>`;
+                }).join('');
+            },
+
+            createFlyingBubble(text, rank) {
+                const el = document.createElement('div');
+                el.className = 'fly-item';
+                if (rank === 1) el.classList.add('rank-1');
+                if (rank === 2) el.classList.add('rank-2');
+                if (rank === 3) el.classList.add('rank-3');
+
+                el.innerHTML = `${text} <span>👍</span>`;
+
+                if (rank <= 3) {
+                    const spark = document.createElement('div'); spark.className = 'spark'; el.appendChild(spark);
+                }
+                if (rank === 1) {
+                    const colors = ['#f00', '#0f0', '#00f', '#ff0', '#0ff'];
+                    for (let i = 0; i < 3; i++) {
+                        const c = document.createElement('div'); c.className = 'confetti-piece';
+                        c.style.setProperty('--c', colors[Math.floor(Math.random() * colors.length)]);
+                        c.style.setProperty('--dx', (Math.random() * 60 - 30) + 'px');
+                        c.style.setProperty('--dy', (Math.random() * 60 - 30) + 'px');
+                        c.style.animationDelay = (Math.random() * 0.5) + 's';
+                        el.appendChild(c);
+                    }
+                }
+
+                const startX = Math.floor(Math.random() * 80) + 10;
+                const duration = (Math.random() * 3 + 2.5) + 's';
+                const scale = rank === 1 ? 1.3 : (Math.random() * 0.6 + 0.7).toFixed(2);
+                const z = rank === 1 ? 999 : Math.floor(Math.random() * 50);
+
+                el.style.setProperty('--startX', `${startX}vw`);
+                el.style.setProperty('--duration', duration);
+                el.style.setProperty('--scale', scale);
+                el.style.setProperty('--z', z);
+
+                document.getElementById('battle-stage').appendChild(el);
+                setTimeout(() => el.remove(), 6000);
+            },
+
+            /* ---------------- POPUP CARD ---------------- */
+            openModal(id) {
+                const p = this.players.find(x => x.id === id);
+                if (!p) return;
+                document.getElementById('modal-img').src = p.image;
+                document.getElementById('modal-img').alt = p.name;
+                document.getElementById('modal-name').textContent = p.name;
+                document.getElementById('modal-rank').textContent = `RANK #${p.rank}`;
+                document.getElementById('modal-score').textContent = `${p.score} PTS`;
+                document.getElementById('modal-bio').textContent = p.bio;
+                document.getElementById('modal-wa').href = `https://wa.me/${p.whatsapp}`;
+                document.getElementById('modal-overlay').classList.add('active');
+            },
+            closeModal() {
+                document.getElementById('modal-overlay').classList.remove('active');
+            }
+        };
+
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') Game.closeModal(); });
+
+        Game.init();
+    </script>
+</body>
+</html>
