@@ -14,7 +14,7 @@
 // SUN — clicking it opens SUN_LINK directly in a new tab. No popup.
 // ---------------------------------------------------------------------
 const SUN_CONFIG = {
-    image: "assets/1.jpg",              // fixed — always assets/1.jpg
+    image: "assets/1.png",              // fixed — always assets/1.png
     link: "https://example.com"         // <-- change to whatever the sun should link to
 };
 
